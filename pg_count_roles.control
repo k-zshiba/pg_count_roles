@@ -1,0 +1,4 @@
+comment = 'pg_count_roles is counting the number of roles in database.'
+default_version = '1.0'
+module_pathname = '$libdir/pg_count_roles'
+relocatable = true

@@ -32,6 +32,7 @@
 #include "utils/builtins.h"
 #include "utils/snapmgr.h"
 #include "utils/wait_event.h"
+#include "pgstat.h"
 
 PG_MODULE_MAGIC;
 
@@ -93,6 +94,7 @@ pg_count_roles_main(Datum main_arg)
         StartTransactionCommand();
         SPI_connect();
         PushActiveSnapshot(GetTransactionSnapshot());
+        pgstat_report_activity(STATE_RUNNING, buf.data);      
 
         initStringInfo(&buf);
 
@@ -120,7 +122,8 @@ pg_count_roles_main(Datum main_arg)
         PopActiveSnapshot();
         CommitTransactionCommand();
     }
-
+    pgstat_report_stat(true);
+    pgstat_report_activity(STATE_IDLE, NULL);
     proc_exit(0);
 }
 

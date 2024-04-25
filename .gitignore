@@ -1,0 +1,10 @@
+# Generated subdirectories
+/log/
+/results/
+/tmp_check/
+
+# Object files
+*.o
+
+# Shared objects
+*.so

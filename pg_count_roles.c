@@ -56,7 +56,7 @@ pg_count_roles_sigterm(SIGNAL_ARGS)
 static void
 pg_count_roles_sighup(SIGNAL_ARGS)
 {
-    elog(LOG, "got sighup");
+    got_sighup = true;
     if (MyProc)
         SetLatch(&MyProc->procLatch);
 }

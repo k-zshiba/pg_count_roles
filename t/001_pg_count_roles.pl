@@ -49,8 +49,8 @@ pg_count_roles.check_duration = 5
 });
 $node->restart;
 
-$result = $node->safe_psql('mydb', q[SELECT state FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
-is($result, 'idle', 'start pg_count_roles after the system is up');
+$result = $node->safe_psql('mydb', q[SELECT datname FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
+is($result, 'mydb', 'connect to the database specified in pg_count_roles.database');
 
 
 done_testing();

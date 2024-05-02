@@ -2,7 +2,7 @@
  *
  * pg_count_roles.c
  *		Simple background worker code scanning the number of roles
- *		present in database.
+ *		present in database cluster.
  *
  * Copyright (c) 1996-2024, PostgreSQL Global Development Group
  *
@@ -121,7 +121,7 @@ pg_count_roles_main(Datum main_arg)
             count = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0],
                                                 SPI_tuptable->tupdesc,
                                                 1, &isnull));
-            elog(LOG, "Currently %d roles in database", count);
+            elog(LOG, "Currently %d roles in database cluster", count);
         }
 
         SPI_finish();

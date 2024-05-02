@@ -87,7 +87,7 @@ pg_count_roles_main(Datum main_arg)
         static uint32 wait_event_info = 0;
 
         if (wait_event_info == 0)
-            wait_event_info  = WaitEventExtensionNew("pg_count_roles_main");
+            wait_event_info  = WaitEventExtensionNew("PgCountRolesMain");
         
 
         WaitLatch(&MyProc->procLatch,

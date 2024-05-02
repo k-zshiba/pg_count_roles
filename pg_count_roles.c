@@ -70,6 +70,7 @@ pg_count_roles_sighup(SIGNAL_ARGS)
 void
 pg_count_roles_main(Datum main_arg)
 {
+    StringInfoData buf;
     /* Register functions for SIGTERM/SIGHUP management */
     pqsignal(SIGHUP, pg_count_roles_sighup);
     pqsignal(SIGTERM, pg_count_roles_sigterm);
@@ -79,11 +80,13 @@ pg_count_roles_main(Datum main_arg)
 
     /* Connect to our database */
     BackgroundWorkerInitializeConnection(pg_count_roles_database, NULL, 0);
+    initStringInfo(&buf);
 
+    /* Build the query string */
+    appendStringInfo(&buf,"SELECT count(*) FROM pg_roles;");
     while (!got_sigterm)
     {
         int ret;
-        StringInfoData buf;
         static uint32 wait_event_info = 0;
 
         if (wait_event_info == 0)
@@ -101,11 +104,6 @@ pg_count_roles_main(Datum main_arg)
         SPI_connect();
         PushActiveSnapshot(GetTransactionSnapshot());
         pgstat_report_activity(STATE_RUNNING, buf.data);      
-
-        initStringInfo(&buf);
-
-        /* Build the query string */
-        appendStringInfo(&buf,"SELECT count(*) FROM pg_roles;");
 
         ret = SPI_execute(buf.data, true, 0);
 

@@ -1,4 +1,4 @@
-comment = 'pg_count_roles is counting the number of roles in database.'
+comment = 'pg_count_roles is counting the number of roles in database cluster.'
 default_version = '1.0'
 module_pathname = '$libdir/pg_count_roles'
 relocatable = true

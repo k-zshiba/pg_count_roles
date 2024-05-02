@@ -6,7 +6,7 @@ OBJS = \
 EXTENSION = pg_count_roles
 
 DATA = pg_count_roles--1.0.sql
-PGFILEDESC = 'pg_count_roles - Count the number of roles in database'
+PGFILEDESC = 'pg_count_roles - Count the number of roles in database cluster'
 
 TAP_TESTS = 1
 

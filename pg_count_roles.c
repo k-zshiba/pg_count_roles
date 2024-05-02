@@ -2,7 +2,7 @@
  *
  * pg_count_roles.c
  *		Simple background worker code scanning the number of roles
- *		present in database.
+ *		present in database cluster.
  *
  * Copyright (c) 1996-2024, PostgreSQL Global Development Group
  *
@@ -30,6 +30,7 @@
 #include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/snapmgr.h"
 #include "utils/wait_event.h"
 #include "pgstat.h"
@@ -40,7 +41,12 @@ PG_FUNCTION_INFO_V1(pg_count_roles_launch);
 
 PGDLLEXPORT void pg_count_roles_main(Datum main_arg) pg_attribute_noreturn();
 
+/* GUC variables */
+static int pg_count_roles_check_duration = 10;
+static char *pg_count_roles_database = NULL;
+
 static volatile sig_atomic_t got_sigterm = false;
+static volatile sig_atomic_t got_sighup = false;
 
 static void
 pg_count_roles_sigterm(SIGNAL_ARGS)
@@ -72,7 +78,7 @@ pg_count_roles_main(Datum main_arg)
     BackgroundWorkerUnblockSignals();
 
     /* Connect to our database */
-    BackgroundWorkerInitializeConnection("postgres", NULL, 0);
+    BackgroundWorkerInitializeConnection(pg_count_roles_database, NULL, 0);
 
     while (!got_sigterm)
     {
@@ -81,12 +87,12 @@ pg_count_roles_main(Datum main_arg)
         static uint32 wait_event_info = 0;
 
         if (wait_event_info == 0)
-            wait_event_info  = WaitEventExtensionNew("pg_count_roles_main");
+            wait_event_info  = WaitEventExtensionNew("PgCountRolesMain");
         
 
         WaitLatch(&MyProc->procLatch,
                         WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
-                        1000L,
+                        pg_count_roles_check_duration * 1000L,
                         wait_event_info);
 
         ResetLatch(&MyProc->procLatch);
@@ -105,25 +111,25 @@ pg_count_roles_main(Datum main_arg)
 
         /* Some error message in case of incorrect handling */
         if (ret != SPI_OK_SELECT)
-            elog(FATAL, "SPI_execute failed: error code %d", ret);
+            elog(FATAL, "SPI_execute failed: error code %d", ret);                                                                                                                                          
 
         if (SPI_processed > 0)
-        {
+        {                                                                   
             int32 count;
             bool isnull;
 
             count = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0],
                                                 SPI_tuptable->tupdesc,
                                                 1, &isnull));
-            elog(LOG, "Currently %d roles in database", count);
+            elog(LOG, "Currently %d roles in database cluster", count);
         }
 
         SPI_finish();
         PopActiveSnapshot();
         CommitTransactionCommand();
+        pgstat_report_stat(true);
+        pgstat_report_activity(STATE_IDLE, NULL);
     }
-    pgstat_report_stat(true);
-    pgstat_report_activity(STATE_IDLE, NULL);
     proc_exit(0);
 }
 
@@ -134,6 +140,38 @@ void
 _PG_init(void)
 {
     BackgroundWorker worker;
+
+	/*
+	 * These GUCs are defined even if this library is not loaded with
+	 * shared_preload_libraries, for pg_count_roles_launch().
+	 */
+
+    DefineCustomIntVariable("pg_count_roles.checK_duration",
+                            "Duration between each check (in seconds).",
+                            NULL,
+                            &pg_count_roles_check_duration,
+                            10,
+                            1,
+                            INT_MAX,
+                            PGC_SIGHUP,
+                            0,
+                            NULL,
+                            NULL,
+                            NULL);
+
+    DefineCustomStringVariable("pg_count_roles.database",
+                                "Database to connect to.",
+                                NULL,
+                                &pg_count_roles_database,
+                                "postgres",
+                                PGC_SIGHUP,
+                                0,
+                                NULL,NULL,NULL);
+
+    if(!process_shared_preload_libraries_in_progress)
+        return;
+    
+    MarkGUCPrefixReserved("pg_count_roles");
 
     /* register the worker processes */
     memset(&worker, 0, sizeof(worker));

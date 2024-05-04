@@ -21,7 +21,7 @@ is($result, 'idle', 'dynamic bgworker has reported "PgCountRolesMain" as wait ev
 
 # Check the "query" column of pg_stat_activity
 $result = $node->safe_psql('postgres', q[SELECT query FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
-is($result, 'SELECT count(*) FROM pg_roles;', 'pg_count_roles_main appears in query columnof pg_stat_activity');
+is($result, 'SELECT count(*) FROM pg_roles;', 'pg_count_roles_main appears in query column of pg_stat_activity');
 
 # Check the wait event used by the dynamic bgworker appears in pg_wait_events
 $result = $node->safe_psql('postgres',

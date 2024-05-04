@@ -144,7 +144,7 @@ _PG_init(void)
 	 * shared_preload_libraries, for pg_count_roles_launch().
 	 */
 
-    DefineCustomIntVariable("pg_count_roles.checK_duration",
+    DefineCustomIntVariable("pg_count_roles.check_duration",
                             "Duration between each check (in seconds).",
                             NULL,
                             &pg_count_roles_check_duration,

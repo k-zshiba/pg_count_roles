@@ -17,8 +17,8 @@ my $result = $node->safe_psql('postgres', 'SELECT pg_count_roles_launch() IS NOT
 is($result, 't', "dynamic bgworker launched");
 
 # Check the wait event used by the dynamic bgworker.
-$result = $node->safe_psql('postgres', q[SELECT state FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
-is($result, 'idle', 'dynamic bgworker has reported "PgCountRolesMain" as wait event');
+$result = $node->safe_psql('postgres', q[SELECT datname FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
+is($result, 'postgres', 'dynamic bgworker has reported "PgCountRolesMain" as wait event');
 
 # Check the "query" column of pg_stat_activity
 $result = $node->safe_psql('postgres', q[SELECT query FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
@@ -66,5 +66,10 @@ $node->restart;
 $result = $node->safe_psql('mydb', q[SELECT datname FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
 is($result, 'mydb', 'connect to the database specified in pg_count_roles.database');
 
+
+my $pid = $node->safe_psql('mydb', q[SELECT pid FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
+$node->safe_psql('mydb',qq[SELECT pg_terminate_backend($pid);]);
+$result = $node->safe_psql('mydb', q[SELECT datname FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
+is($result, '', 'stop worker by sending SIGTERM');
 
 done_testing();

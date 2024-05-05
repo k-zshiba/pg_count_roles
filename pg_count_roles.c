@@ -29,6 +29,7 @@
 #include "executor/spi.h"
 #include "fmgr.h"
 #include "lib/stringinfo.h"
+#include "tcop/utility.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/snapmgr.h"
@@ -45,35 +46,13 @@ PGDLLEXPORT void pg_count_roles_main(Datum main_arg) pg_attribute_noreturn();
 static int pg_count_roles_check_duration = 10;
 static char *pg_count_roles_database = NULL;
 
-static volatile sig_atomic_t got_sigterm = false;
-static volatile sig_atomic_t got_sighup = false;
-
-static void
-pg_count_roles_sigterm(SIGNAL_ARGS)
-{
-    int save_errno = errno;
-
-    got_sigterm = true;
-    if (MyProc)
-        SetLatch(&MyProc->procLatch);
-    errno = save_errno;
-}
-
-static void
-pg_count_roles_sighup(SIGNAL_ARGS)
-{
-    got_sighup = true;
-    if (MyProc)
-        SetLatch(&MyProc->procLatch);
-}
-
 void
 pg_count_roles_main(Datum main_arg)
 {
     StringInfoData buf;
     /* Register functions for SIGTERM/SIGHUP management */
-    pqsignal(SIGHUP, pg_count_roles_sighup);
-    pqsignal(SIGTERM, pg_count_roles_sigterm);
+    pqsignal(SIGHUP, SignalHandlerForConfigReload);
+    pqsignal(SIGTERM, die);
 
     /* We're now ready to receive signals */
     BackgroundWorkerUnblockSignals();
@@ -84,11 +63,20 @@ pg_count_roles_main(Datum main_arg)
 
     /* Build the query string */
     appendStringInfo(&buf,"SELECT count(*) FROM pg_roles;");
-    while (!got_sigterm)
+    for (;;)
     {
         int ret;
         static uint32 wait_event_info = 0;
 
+		/*
+		 * In case of a SIGHUP, just reload the configuration.
+		 */
+		if (ConfigReloadPending)
+		{
+			ConfigReloadPending = false;
+			ProcessConfigFile(PGC_SIGHUP);
+		}
+        
         if (wait_event_info == 0)
             wait_event_info  = WaitEventExtensionNew("PgCountRolesMain");
         
@@ -144,7 +132,7 @@ _PG_init(void)
 	 * shared_preload_libraries, for pg_count_roles_launch().
 	 */
 
-    DefineCustomIntVariable("pg_count_roles.checK_duration",
+    DefineCustomIntVariable("pg_count_roles.check_duration",
                             "Duration between each check (in seconds).",
                             NULL,
                             &pg_count_roles_check_duration,

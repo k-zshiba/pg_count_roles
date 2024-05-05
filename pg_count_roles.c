@@ -81,12 +81,14 @@ pg_count_roles_main(Datum main_arg)
             wait_event_info  = WaitEventExtensionNew("PgCountRolesMain");
         
 
-        WaitLatch(&MyProc->procLatch,
+        (void) WaitLatch(MyLatch,
                         WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
                         pg_count_roles_check_duration * 1000L,
                         wait_event_info);
 
-        ResetLatch(&MyProc->procLatch);
+        ResetLatch(MyLatch);
+
+        CHECK_FOR_INTERRUPTS();
 
         StartTransactionCommand();
         SPI_connect();
@@ -116,7 +118,8 @@ pg_count_roles_main(Datum main_arg)
         pgstat_report_stat(true);
         pgstat_report_activity(STATE_IDLE, NULL);
     }
-    proc_exit(0);
+
+    /* Not reachable*/
 }
 
 /*

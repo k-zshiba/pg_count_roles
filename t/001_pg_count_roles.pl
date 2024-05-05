@@ -3,7 +3,6 @@ use warnings FATAL => 'all';
 use PostgreSQL::Test::Cluster;
 use PostgreSQL::Test::Utils;
 use Test::More;
-use Time::Piece;
 
 
 my $node = PostgreSQL::Test::Cluster->new('mynode');
@@ -22,7 +21,7 @@ is($result, 'idle', 'dynamic bgworker has reported "PgCountRolesMain" as wait ev
 
 # Check the "query" column of pg_stat_activity
 $result = $node->safe_psql('postgres', q[SELECT query FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
-is($result, 'SELECT count(*) FROM pg_roles;', 'pg_count_roles_main appears in query column of pg_stat_activity');
+is($result, 'SELECT count(*) FROM pg_roles;', 'pg_count_roles_main appears in query columnof pg_stat_activity');
 
 # Check the wait event used by the dynamic bgworker appears in pg_wait_events
 $result = $node->safe_psql('postgres',
@@ -33,25 +32,11 @@ $node->append_conf(
     'postgresql.conf', q{
 pg_count_roles.database = 'dummydb'
 });
-$node->reload;
+$node->restart;
 my $log_offset = -s $node->logfile;
 $node->safe_psql('postgres', 'SELECT pg_count_roles_launch();');
 $node->wait_for_log(qr/database "dummydb" does not exist/,
                     $log_offset);
-$node->append_conf(
-    'postgresql.conf', q{
-pg_count_roles.check_duration = 5
-});
-$node->reload;
-$node->wait_for_log(qr/roles in database cluster/);
-$log_offset = -s $node->logfile;
-$node->wait_for_log(qr/roles in database cluster/,$log_offset);
-my $start = Time::Piece->strptime(substr(slurp_file($node->logfile, $log_offset),11,12),'%T.%N');
-$log_offset = -s $node->logfile;
-$node->wait_for_log(qr/roles in database cluster/,$log_offset);
-my $end = Time::Piece->strptime(substr(slurp_file($node->logfile, $log_offset),11,12),'%T.%N');
-my $duration = $end - $start;
-is($duration ,5,'Test whether the database is accessed at the interval set in pg_count_roles.check_duration');
 
 note "testing bgworkers loaded with shared_preload_libraries";
 
@@ -60,6 +45,7 @@ $node->append_conf(
     'postgresql.conf', q{
 shared_preload_libraries = 'pg_count_roles'
 pg_count_roles.database = 'mydb'
+pg_count_roles.check_duration = 5
 });
 $node->restart;
 

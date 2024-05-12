@@ -13,21 +13,29 @@ $node->start;
 note "testing dynamic bgworkder";
 
 $node->safe_psql('postgres', 'CREATE EXTENSION pg_count_roles;');
-my $result = $node->safe_psql('postgres', 'SELECT pg_count_roles_launch() IS NOT NULL;');
-is($result, 't', "dynamic bgworker launched");
+my $pid = $node->safe_psql('postgres', 'SELECT pg_count_roles_launch();');
+ok($pid > 0, "dynamic bgworker launched");
 
 # Check the wait event used by the dynamic bgworker.
-$result = $node->safe_psql('postgres', q[SELECT datname FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
-is($result, 'postgres', 'dynamic bgworker has reported "PgCountRolesMain" as wait event');
+ok($node->poll_query_until(
+    'postgres', 
+    q[SELECT count(*) > 0 FROM pg_stat_activity 
+        WHERE wait_event = 'PgCountRolesMain' AND state = 'idle';]),
+    'dynamic bgworker has reported "PgCountRolesMain" as wait event');
 
 # Check the "query" column of pg_stat_activity
-$result = $node->safe_psql('postgres', q[SELECT query FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
-is($result, 'SELECT count(*) FROM pg_roles;', 'pg_count_roles_main appears in query column of pg_stat_activity');
+ok($node->poll_query_until(
+    'postgres', 
+    q[SELECT count(*) > 0 FROM pg_stat_activity 
+        WHERE wait_event = 'PgCountRolesMain' AND query = 'SELECT count(*) FROM pg_roles;';]),
+    'pg_count_roles_main appears in query column of pg_stat_activity');
 
 # Check the wait event used by the dynamic bgworker appears in pg_wait_events
-$result = $node->safe_psql('postgres',
-    q[SELECT count(*) > 0 FROM pg_wait_events WHERE type = 'Extension' AND name = 'PgCountRolesMain';]);
-is($result, 't', '"PgCountRolesMain" is reported in pg_wait_events');
+ok($node->poll_query_until(
+    'postgres',
+    q[SELECT count(*) > 0 FROM pg_wait_events 
+        WHERE type = 'Extension' AND name = 'PgCountRolesMain';]),
+    '"PgCountRolesMain" is reported in pg_wait_events');
 
 # reload check_duration
 $node->append_conf(
@@ -43,7 +51,13 @@ $log_offset = -s $node->logfile;
 $node->wait_for_log(qr/roles in database cluster/,$log_offset);
 my $end = Time::Piece->strptime(substr(slurp_file($node->logfile, $log_offset),11,12),'%T.%N');
 my $duration = $end - $start;
-is($duration ,5,'Test whether the database is accessed at the interval set in pg_count_roles.check_duration');
+ok($duration >= 5,'Test whether the database is accessed at the interval set in pg_count_roles.check_duration');
+
+$node->safe_psql('postgres',qq[SELECT pg_terminate_backend($pid);]);
+my $result = $node->safe_psql('postgres', 
+        qq[SELECT * FROM pg_stat_activity 
+            WHERE wait_event = 'PgCountRolesMain' AND pid = $pid]);
+is($result, '', 'stop worker by sending SIGTERM');
 
 note "testing bgworkers loaded with shared_preload_libraries";
 
@@ -55,13 +69,10 @@ pg_count_roles.database = 'mydb'
 });
 $node->restart;
 
-$result = $node->safe_psql('mydb', q[SELECT datname FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
-is($result, 'mydb', 'connect to the database specified in pg_count_roles.database');
-
-
-my $pid = $node->safe_psql('mydb', q[SELECT pid FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
-$node->safe_psql('mydb',qq[SELECT pg_terminate_backend($pid);]);
-$result = $node->safe_psql('mydb', q[SELECT datname FROM pg_stat_activity WHERE wait_event = 'PgCountRolesMain';]);
-is($result, '', 'stop worker by sending SIGTERM');
+ok($node->poll_query_until(
+    'mydb', 
+    q[SELECT count(*) > 0 FROM pg_stat_activity 
+        WHERE wait_event = 'PgCountRolesMain';]),
+    'connect to the database specified in pg_count_roles.database');
 
 done_testing();

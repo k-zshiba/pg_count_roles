@@ -29,22 +29,14 @@ $result = $node->safe_psql('postgres',
     q[SELECT count(*) > 0 FROM pg_wait_events WHERE type = 'Extension' AND name = 'PgCountRolesMain';]);
 is($result, 't', '"PgCountRolesMain" is reported in pg_wait_events');
 
-$node->append_conf(
-    'postgresql.conf', q{
-pg_count_roles.database = 'dummydb'
-});
-$node->reload;
-my $log_offset = -s $node->logfile;
-$node->safe_psql('postgres', 'SELECT pg_count_roles_launch();');
-$node->wait_for_log(qr/database "dummydb" does not exist/,
-                    $log_offset);
+# reload check_duration
 $node->append_conf(
     'postgresql.conf', q{
 pg_count_roles.check_duration = 5
 });
 $node->reload;
 $node->wait_for_log(qr/roles in database cluster/);
-$log_offset = -s $node->logfile;
+my $log_offset = -s $node->logfile;
 $node->wait_for_log(qr/roles in database cluster/,$log_offset);
 my $start = Time::Piece->strptime(substr(slurp_file($node->logfile, $log_offset),11,12),'%T.%N');
 $log_offset = -s $node->logfile;

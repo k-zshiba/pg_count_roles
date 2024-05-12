@@ -58,7 +58,11 @@ pg_count_roles_main(Datum main_arg)
     BackgroundWorkerUnblockSignals();
 
     /* Connect to our database */
-    BackgroundWorkerInitializeConnection(pg_count_roles_database, NULL, 0);
+    if(!pg_count_roles_database){
+        BackgroundWorkerInitializeConnection("postgres", NULL, 0);
+    }else{
+        BackgroundWorkerInitializeConnection(pg_count_roles_database, NULL, 0);
+    }
     initStringInfo(&buf);
 
     /* Build the query string */
@@ -145,18 +149,17 @@ _PG_init(void)
                             NULL,
                             NULL);
 
+    if(!process_shared_preload_libraries_in_progress)
+        return;
+        
     DefineCustomStringVariable("pg_count_roles.database",
                                 "Database to connect to.",
                                 NULL,
                                 &pg_count_roles_database,
                                 "postgres",
-                                PGC_SIGHUP,
+                                PGC_POSTMASTER,
                                 0,
                                 NULL,NULL,NULL);
-
-    if(!process_shared_preload_libraries_in_progress)
-        return;
-    
     MarkGUCPrefixReserved("pg_count_roles");
 
     /* register the worker processes */

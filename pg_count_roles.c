@@ -2,7 +2,7 @@
  *
  * pg_count_roles.c
  *		Simple background worker code scanning the number of roles
- *		present in database.
+ *		present in database cluster.
  *
  * Copyright (c) 1996-2024, PostgreSQL Global Development Group
  *
@@ -29,7 +29,9 @@
 #include "executor/spi.h"
 #include "fmgr.h"
 #include "lib/stringinfo.h"
+#include "tcop/utility.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/snapmgr.h"
 #include "utils/wait_event.h"
 #include "pgstat.h"
@@ -40,91 +42,88 @@ PG_FUNCTION_INFO_V1(pg_count_roles_launch);
 
 PGDLLEXPORT void pg_count_roles_main(Datum main_arg) pg_attribute_noreturn();
 
-static volatile sig_atomic_t got_sigterm = false;
-
-static void
-pg_count_roles_sigterm(SIGNAL_ARGS)
-{
-    int save_errno = errno;
-
-    got_sigterm = true;
-    if (MyProc)
-        SetLatch(&MyProc->procLatch);
-    errno = save_errno;
-}
-
-static void
-pg_count_roles_sighup(SIGNAL_ARGS)
-{
-    elog(LOG, "got sighup");
-    if (MyProc)
-        SetLatch(&MyProc->procLatch);
-}
+/* GUC variables */
+static int pg_count_roles_check_duration = 10;
+static char *pg_count_roles_database = NULL;
 
 void
 pg_count_roles_main(Datum main_arg)
 {
+    StringInfoData buf;
     /* Register functions for SIGTERM/SIGHUP management */
-    pqsignal(SIGHUP, pg_count_roles_sighup);
-    pqsignal(SIGTERM, pg_count_roles_sigterm);
+    pqsignal(SIGHUP, SignalHandlerForConfigReload);
+    pqsignal(SIGTERM, die);
 
     /* We're now ready to receive signals */
     BackgroundWorkerUnblockSignals();
 
     /* Connect to our database */
-    BackgroundWorkerInitializeConnection("postgres", NULL, 0);
+    if(!pg_count_roles_database){
+        BackgroundWorkerInitializeConnection("postgres", NULL, 0);
+    }else{
+        BackgroundWorkerInitializeConnection(pg_count_roles_database, NULL, 0);
+    }
+    initStringInfo(&buf);
 
-    while (!got_sigterm)
+    /* Build the query string */
+    appendStringInfo(&buf,"SELECT count(*) FROM pg_roles;");
+    for (;;)
     {
         int ret;
-        StringInfoData buf;
         static uint32 wait_event_info = 0;
 
+		/*
+		 * In case of a SIGHUP, just reload the configuration.
+		 */
+		if (ConfigReloadPending)
+		{
+			ConfigReloadPending = false;
+			ProcessConfigFile(PGC_SIGHUP);
+		}
+        
         if (wait_event_info == 0)
-            wait_event_info  = WaitEventExtensionNew("pg_count_roles_main");
+            wait_event_info  = WaitEventExtensionNew("PgCountRolesMain");
         
 
-        WaitLatch(&MyProc->procLatch,
+        (void) WaitLatch(MyLatch,
                         WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
-                        1000L,
+                        pg_count_roles_check_duration * 1000L,
                         wait_event_info);
 
-        ResetLatch(&MyProc->procLatch);
+        ResetLatch(MyLatch);
+
+        CHECK_FOR_INTERRUPTS();
 
         StartTransactionCommand();
         SPI_connect();
         PushActiveSnapshot(GetTransactionSnapshot());
         pgstat_report_activity(STATE_RUNNING, buf.data);      
 
-        initStringInfo(&buf);
-
-        /* Build the query string */
-        appendStringInfo(&buf,"SELECT count(*) FROM pg_roles;");
-
         ret = SPI_execute(buf.data, true, 0);
 
         /* Some error message in case of incorrect handling */
         if (ret != SPI_OK_SELECT)
-            elog(FATAL, "SPI_execute failed: error code %d", ret);
+            elog(FATAL, "SPI_execute failed: error code %d", ret);                                                                                                                                          
 
         if (SPI_processed > 0)
-        {
+        {                                                                   
             int32 count;
             bool isnull;
 
             count = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0],
                                                 SPI_tuptable->tupdesc,
                                                 1, &isnull));
-            elog(LOG, "Currently %d roles in database", count);
+            elog(LOG, "Currently %d roles in database cluster", count);
         }
 
         SPI_finish();
         PopActiveSnapshot();
         CommitTransactionCommand();
+        pgstat_report_stat(true);
+        pgstat_report_activity(STATE_IDLE, NULL);
     }
-    pgstat_report_stat(true);
-    pgstat_report_activity(STATE_IDLE, NULL);
-    proc_exit(0);
+
+    /* Not reachable*/
 }
 
 /*
@@ -134,6 +133,37 @@ void
 _PG_init(void)
 {
     BackgroundWorker worker;
+
+	/*
+	 * These GUCs are defined even if this library is not loaded with
+	 * shared_preload_libraries, for pg_count_roles_launch().
+	 */
+
+    DefineCustomIntVariable("pg_count_roles.check_duration",
+                            "Duration between each check (in seconds).",
+                            NULL,
+                            &pg_count_roles_check_duration,
+                            10,
+                            1,
+                            INT_MAX,
+                            PGC_SIGHUP,
+                            0,
+                            NULL,
+                            NULL,
+                            NULL);
+
+    if(!process_shared_preload_libraries_in_progress)
+        return;
+        
+    DefineCustomStringVariable("pg_count_roles.database",
+                                "Database to connect to.",
+                                NULL,
+                                &pg_count_roles_database,
+                                "postgres",
+                                PGC_POSTMASTER,
+                                0,
+                                NULL,NULL,NULL);
+    MarkGUCPrefixReserved("pg_count_roles");
 
     /* register the worker processes */
     memset(&worker, 0, sizeof(worker));
